@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ILMAR SELTER — C4ISR / DELTA HUD CV & Portfoolio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700;800&family=Orbitron:wght@500;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #06090e;
+      --bg-panel: rgba(10, 16, 26, 0.88);
+      --bg-panel-border: #1a2a40;
+      --cyan-glow: #00f3c8;
+      --cyan-dim: rgba(0, 243, 200, 0.15);
+      --cyan-bright: #39ffdb;
+      --amber-accent: #ffb700;
+      --amber-dim: rgba(255, 183, 0, 0.15);
+      --red-threat: #ff3366;
+      --red-dim: rgba(255, 51, 102, 0.18);
+      --text-main: #d4e2ed;
+      --text-muted: #7e9bb3;
+      --text-bright: #ffffff;
+      --hud-grid: rgba(0, 243, 200, 0.04);
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-hud: 'Orbitron', sans-serif;
+      --font-body: 'Inter', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-body);
+      line-height: 1.5;
+      overflow-x: hidden;
+      min-height: 100vh;
+      position: relative;
+    }
+
+    /* Ambient scanline and tactical grid overlays */
+    .tactical-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: 
+        linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+        linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02)),
+        linear-gradient(90deg, var(--hud-grid) 1px, transparent 1px),
+        linear-gradient(var(--hud-grid) 1px, transparent 1px);
+      background-size: 100% 3px, 6px 100%, 40px 40px, 40px 40px;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.85;
+    }
+
+    /* Tactical Interactive Map Canvas */
+    #tacticalCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+      opacity: 0.42;
+      transition: opacity 0.4s ease;
+    }
+
+    .container {
+      position: relative;
+      z-index: 2;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px 20px 80px 20px;
+    }
+
+    /* Top HUD Telemetry Bar */
+    .hud-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-panel);
+      border: 1px solid var(--bg-panel-border);
+      border-left: 4px solid var(--cyan-glow);
+      padding: 10px 18px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      border-radius: 4px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(8px);
+    }
+
+    .hud-ticker {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .hud-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 243, 200, 0.08);
+      border: 1px solid rgba(0, 243, 200, 0.3);
+      color: var(--cyan-bright);
+      padding: 2px 8px;
+      border-radius: 2px;
+      font-weight: 600;
+    }
+
+    .hud-badge.warning {
+      background: var(--amber-dim);
+      border-color: rgba(255, 183, 0, 0.4);
+      color: var(--amber-accent);
+    }
+
+    .hud-badge.threat {
+      background: var(--red-dim);
+      border-color: rgba(255, 51, 102, 0.4);
+      color: var(--red-threat);
+    }
+
+    .blink-dot {
+      width: 6px;
+      height: 6px;
+      background-color: var(--cyan-glow);
+      border-radius: 50%;
+      animation: pulseGlow 1.5s infinite;
+    }
+
+    @keyframes pulseGlow {
+      0% { opacity: 0.3; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.3); filter: drop-shadow(0 0 6px var(--cyan-bright)); }
+      100% { opacity: 0.3; transform: scale(0.9); }
+    }
+
+    /* Controls: Lang Toggle & Map Opacity */
+    .hud-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn-toggle {
+      background: rgba(0, 243, 200, 0.1);
+      border: 1px solid var(--cyan-glow);
+      color: var(--cyan-bright);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 3px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      letter-spacing: 1px;
+    }
+
+    .btn-toggle:hover {
+      background: var(--cyan-glow);
+      color: #06090e;
+      box-shadow: 0 0 12px var(--cyan-bright);
+    }
+
+    /* Header Profile Card */
+    .profile-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--bg-panel-border);
+      border-radius: 6px;
+      padding: 30px;
+      margin-bottom: 24px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(10px);
+    }
+
+    .profile-card::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 2px;
+      background: linear-gradient(90deg, var(--cyan-glow), var(--amber-accent), transparent);
+    }
+
+    .profile-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+    }
+
+    .profile-info h1 {
+      font-family: var(--font-hud);
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: var(--text-bright);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      text-shadow: 0 0 12px rgba(0, 243, 200, 0.4);
+    }
+
+    .profile-subtitle {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--cyan-bright);
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+
+    .profile-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .profile-meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .profile-meta-item a {
+      color: var(--cyan-glow);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .profile-meta-item a:hover {
+      color: #fff;
+      text-decoration: underline;
+    }
+
+    .action-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .btn-action {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 16px;
+      border-radius: 4px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-action.primary {
+      background: linear-gradient(135deg, #00c9a7, #008f7a);
+      color: #ffffff;
+      border: 1px solid var(--cyan-bright);
+      box-shadow: 0 0 15px rgba(0, 243, 200, 0.3);
+    }
+
+    .btn-action.primary:hover {
+      background: var(--cyan-bright);
+      color: #06090e;
+      box-shadow: 0 0 25px var(--cyan-bright);
+      transform: translateY(-1px);
+    }
+
+    .btn-action.secondary {
+      background: rgba(255, 183, 0, 0.1);
+      color: var(--amber-accent);
+      border: 1px solid rgba(255, 183, 0, 0.4);
+    }
+
+    .btn-action.secondary:hover {
+      background: var(--amber-accent);
+      color: #06090e;
+      box-shadow: 0 0 15px var(--amber-accent);
+    }
+
+    .btn-action.neutral {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border: 1px solid var(--bg-panel-border);
+    }
+
+    .btn-action.neutral:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: var(--cyan-glow);
+      color: #ffffff;
+    }
+
+    /* Main Grid Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    /* Section Styling */
+    .hud-section {
+      background: var(--bg-panel);
+      border: 1px solid var(--bg-panel-border);
+      border-radius: 6px;
+      padding: 26px;
+      box-shadow: 0 6px 25px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
+      position: relative;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--bg-panel-border);
+      padding-bottom: 14px;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-family: var(--font-hud);
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--cyan-bright);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .section-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.03);
+      padding: 3px 8px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    /* Colab Portfolio Cards Grid */
+    .portfolio-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+    }
+
+    .colab-card {
+      background: rgba(6, 12, 20, 0.85);
+      border: 1px solid var(--bg-panel-border);
+      border-radius: 5px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+
+    .colab-card:hover {
+      border-color: var(--cyan-glow);
+      box-shadow: 0 0 18px rgba(0, 243, 200, 0.2);
+      transform: translateY(-2px);
+    }
+
+    .colab-num {
+      font-family: var(--font-hud);
+      font-size: 20px;
+      font-weight: 900;
+      color: var(--cyan-glow);
+      margin-bottom: 4px;
+    }
+
+    .colab-title {
+      font-family: var(--font-body);
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text-bright);
+      margin-bottom: 10px;
+      line-height: 1.35;
+    }
+
+    .colab-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      flex-grow: 1;
+    }
+
+    .telemetry-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .pill {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 2px;
+      background: rgba(0, 243, 200, 0.06);
+      border: 1px solid rgba(0, 243, 200, 0.25);
+      color: var(--cyan-bright);
+    }
+
+    .pill.amber {
+      background: var(--amber-dim);
+      border-color: rgba(255, 183, 0, 0.3);
+      color: var(--amber-accent);
+    }
+
+    .btn-colab {
+      background: linear-gradient(135deg, rgba(0, 243, 200, 0.15), rgba(0, 201, 167, 0.3));
+      border: 1px solid var(--cyan-glow);
+      color: var(--text-bright);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 3px;
+      text-align: center;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-colab:hover {
+      background: var(--cyan-glow);
+      color: #06090e;
+      box-shadow: 0 0 15px var(--cyan-bright);
+    }
+
+    /* Experience Timeline */
+    .timeline {
+      position: relative;
+      padding-left: 20px;
+    }
+
+    .timeline::before {
+      content: "";
+      position: absolute;
+      top: 0; bottom: 0; left: 4px;
+      width: 2px;
+      background: linear-gradient(180deg, var(--cyan-glow), var(--bg-panel-border));
+    }
+
+    .timeline-item {
+      position: relative;
+      margin-bottom: 24px;
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      top: 6px; left: -20px;
+      width: 10px; height: 10px;
+      background: var(--bg-base);
+      border: 2px solid var(--cyan-glow);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--cyan-bright);
+    }
+
+    .timeline-date {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--amber-accent);
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .timeline-role {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-bright);
+      margin-bottom: 2px;
+    }
+
+    .timeline-company {
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--cyan-bright);
+      margin-bottom: 8px;
+    }
+
+    .timeline-body {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    /* Skills Grid */
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .skill-block {
+      background: rgba(6, 12, 20, 0.6);
+      border: 1px solid var(--bg-panel-border);
+      border-left: 3px solid var(--amber-accent);
+      padding: 16px;
+      border-radius: 4px;
+    }
+
+    .skill-block h4 {
+      font-family: var(--font-hud);
+      font-size: 13px;
+      color: var(--amber-accent);
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+
+    .skill-block p {
+      font-size: 12px;
+      color: var(--text-main);
+      line-height: 1.5;
+    }
+
+    /* Footer */
+    footer {
+      margin-top: 40px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--bg-panel-border);
+      padding-top: 20px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container { padding: 12px 10px 40px 10px; }
+      .profile-card { padding: 20px; }
+      .profile-info h1 { font-size: 24px; }
+      .hud-bar { flex-direction: column; align-items: flex-start; gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="tactical-overlay"></div>
+  <canvas id="tacticalCanvas"></canvas>
+
+  <div class="container">
+    <!-- Top HUD Telemetry Bar -->
+    <div class="hud-bar">
+      <div class="hud-ticker">
+        <span class="hud-badge"><span class="blink-dot"></span> <span id="status-c4isr">C4ISR // NATO APP-6</span></span>
+        <span class="hud-badge warning"><span id="status-gnss">GNSS: SEGATUD / JAMMED</span></span>
+        <span class="hud-badge"><span id="status-pfl3">FlyWire PFL3 LOCK: R²=0.99999</span></span>
+        <span class="hud-badge"><span id="status-time">TIME UTC: 00:00:00</span></span>
+      </div>
+      <div class="hud-controls">
+        <button class="btn-toggle" onclick="toggleLanguage()" id="langBtn">
+          <span>🌐</span> <span id="langBtnText">ENG / EST</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Profile Header Card -->
+    <div class="profile-card">
+      <div class="profile-header">
+        <div class="profile-info">
+          <h1>ILMAR SELTER</h1>
+          <div class="profile-subtitle" id="prof-sub">
+            AI töövoogude automatiseerimine, süsteemide ühendamine ja prototüüpide veahaldus
+          </div>
+          <div class="profile-meta">
+            <span class="profile-meta-item">📍 Riia 17-64, 51010 Tartu</span>
+            <span class="profile-meta-item">📞 <a href="https://wa.me/37253334380" target="_blank">+372 5333 4380 (WhatsApp)</a></span>
+            <span class="profile-meta-item">✉️ <a href="mailto:ilmar.selter@gmail.com">ilmar.selter@gmail.com</a></span>
+            <span class="profile-meta-item">🐙 <a href="https://github.com/IsleOf/Agentic-Universe" target="_blank">github.com/IsleOf/Agentic-Universe</a></span>
+            <span class="profile-meta-item">👥 <a href="https://facebook.com/groups/kratimanaja/" target="_blank">facebook.com/groups/kratimanaja/ (~400 liiget)</a></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="action-links">
+        <a href="Ilmar_Selter_CV_C4ISR_HUD_ET.pdf" class="btn-action primary" download>
+          <span>📥</span> <span id="btn-pdf-dl">Laadi alla PDF CV (2 lehte)</span>
+        </a>
+        <a href="https://drive.google.com/drive/folders/1dwN8spNdMkdVmklrNiJelAvC67OszWdE" target="_blank" class="btn-action secondary">
+          <span>📁</span> <span id="btn-drive">Google Drive Colab Portfoolio</span>
+        </a>
+        <a href="https://github.com/IsleOf/tivj-c4isr-cv" target="_blank" class="btn-action neutral">
+          <span>⚙️</span> <span>GitHub Repository</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <!-- Section 1: Executive Summary -->
+      <div class="hud-section">
+        <div class="section-header">
+          <div class="section-title">
+            <span>🛡️</span> <span id="title-summary">KOKKUVÕTE // EXECUTIVE SUMMARY</span>
+          </div>
+          <span class="section-tag">C4ISR / TIVJ COMPLIANT</span>
+        </div>
+        <p id="content-summary" style="font-size: 14px; line-height: 1.7; color: var(--text-main);">
+          Tegelen igapäevaselt töövoogude automatiseerimise, tarkvarasüsteemide ühendamise ning AI-rakmete (AI harness) ja mudelite esilekerkivate omaduste uurimisega (projekt Agentic-Universe GitHubis; kasutan igapäevaselt Python-it, Claude Code-i, Codex-it, OpenCode-i, Antigravity-t, Hermes-t, visuaalseid keelemudeleid / VLM-e ja avatud lähtekoodiga UI-automaatika mudeleid lokaalsetes masinates ja Linuxi VPS-serverites). Varasemalt töötasin Soomes Tamperes Nokia üksuses (Cybercom Estonia OÜ) prototüüptelefonide testija, R&D spetsialisti ja veahaldurina (Error Manager), kus haldasin testkasutajate veateateid Lotus Notes keskkonnas, suunasin filtreeritud vead arendajatele ning töötasin R&D kõrvalprojektis Maemo ja BeagleBoard (Raspberry Pi sarnane ARM äärearvuti) platvormidele praktiliste kasutusjuhtude leidmise ja testimisega. Ajateenistuse läbisin Narva-Jõesuu Piirivalve Õppekeskuse sissikompaniis staabikirjutajana, kus aitasin ohvitsere õppetöös ja joonestasin operatsioonikaarte NATO standardites juba enne Eesti liitumist NATO-ga. Juhin ligi 400 liikmega Facebooki AI- ja automaatikagruppi Kratimanaja.
+        </p>
+      </div>
+
+      <!-- Section 2: Executable Colab Models -->
+      <div class="hud-section">
+        <div class="section-header">
+          <div class="section-title">
+            <span>⚡</span> <span id="title-colabs">KÄIVITATAVAD GOOGLE COLAB NÄIDISMUDELID</span>
+          </div>
+          <span class="section-tag">GOOGLE DRIVE SHARED PORTFOLIO</span>
+        </div>
+
+        <div class="portfolio-grid">
+          <!-- Colab 01 -->
+          <div class="colab-card">
+            <div>
+              <div class="colab-num">01</div>
+              <div class="colab-title" id="c1-title">Veatriaaž, Android ADB sild NATO CoT XML-i ja Jetson Orin Nano INT8</div>
+              <div class="colab-desc" id="c1-desc">
+                Seob telemeetria anomaaliad operaatori veateatega Bayesi juurpõhjuste mudelisse, loeb läbi ADB ja VLM-i suletud Androidi ekraanilt sihtmärgi koordinaadid NATO CoT v2.0 XML-formaati (CEP95 = 19.67 m), genereerib MCP CAD-klambri ning testib Colabi T4 GPU peal NVIDIA Jetson Orin Nano (8GB) INT8 kvantimist (9.4 ms / 106 FPS).
+              </div>
+              <div class="telemetry-pills">
+                <span class="pill">NATO CoT v2.0</span>
+                <span class="pill">UI-TARS ADB</span>
+                <span class="pill">FastMCP CAD</span>
+                <span class="pill amber">Jetson INT8 (9.4ms)</span>
+              </div>
+            </div>
+            <a href="https://colab.research.google.com/drive/1BB99BOAaugRM4fGcXRb5zF1YqNbnmwmy" target="_blank" class="btn-colab">
+              <span>▶</span> <span id="c1-btn">Käivita Colab T4</span>
+            </a>
+          </div>
+
+          <!-- Colab 02 -->
+          <div class="colab-card">
+            <div>
+              <div class="colab-num">02</div>
+              <div class="colab-title" id="c2-title">HippoRAG 2 ja PathRAG mitme-sammu teadmusotsing tehnilistest juhenditest</div>
+              <div class="colab-desc" id="c2-desc">
+                2026. a HippoRAG 2 (Personalized PageRank) ja PathRAG seoseahelate kärpimine leiab mitut dokumenti läbiva põhjusliku ahela 0.84 ms jooksul 2.72x väiksema tekstikuluga (100% täpsus militaarsete andmete ja remondijuhendite seostamisel).
+              </div>
+              <div class="telemetry-pills">
+                <span class="pill">HippoRAG 2</span>
+                <span class="pill">PathRAG</span>
+                <span class="pill">Personalized PageRank</span>
+                <span class="pill amber">Latency: 0.84ms</span>
+              </div>
+            </div>
+            <a href="https://colab.research.google.com/drive/1aJZ_YJ44wCjIZeKlBeLulhCXH2PVDgQ1" target="_blank" class="btn-colab">
+              <span>▶</span> <span id="c2-btn">Käivita Colab T4</span>
+            </a>
+          </div>
+
+          <!-- Colab 03 -->
+          <div class="colab-card">
+            <div>
+              <div class="colab-num">03</div>
+              <div class="colab-title" id="c3-title">Tsiviilsõiduki UGV konversioon ja CBF-QP ohutusfilter (~146 € komplekt)</div>
+              <div class="colab-desc" id="c3-desc">
+                Kompenseerib 18V akutrelli mootori roolireduktori kiiruspiirangu (28°/s) ja kaamera 140 ms pildiviite Smithi olekuennustusega (-58.3% trajektooriviga), juhib auto CBF ohutusfiltriga ümber mürsulehtri (+1.40 m varu) ning rakendab sidekao korral 150 ms turvarelee ja tiguajamiga piduri.
+              </div>
+              <div class="telemetry-pills">
+                <span class="pill">CBF-QP Filter</span>
+                <span class="pill">Smith Predictor</span>
+                <span class="pill">18V Planetary Gear</span>
+                <span class="pill amber">Watchdog: 150ms</span>
+              </div>
+            </div>
+            <a href="https://colab.research.google.com/drive/1AH5thFFnZD0LLVIAjnflJxcH278lTfwI" target="_blank" class="btn-colab">
+              <span>▶</span> <span id="c3-btn">Käivita Colab T4</span>
+            </a>
+          </div>
+
+          <!-- Colab 04 -->
+          <div class="colab-card">
+            <div>
+              <div class="colab-num">04</div>
+              <div class="colab-title" id="c4-title">FlyWire konnektoomi GPS-vaba 3D FPV drooninavigatsioon ja tehisaju</div>
+              <div class="colab-desc" id="c4-desc">
+                Kui GPS on segatud, kasutab mudel äädikakärbse elektronmikroskoobi ajuskanneeringust (FlyWire konnektoom) võetud navigatsioonikeskuse (Central Complex E-PG kompassi- ja P-FN kiirusneuronite) sünaptilist võrku, hoides ilma GPS-ita kompassisuunda (R² = 0.99999) ja arvutades kodutee vektori (0.65° täpsusega, triiv 0.91%).
+              </div>
+              <div class="telemetry-pills">
+                <span class="pill">FlyWire Connectome</span>
+                <span class="pill">E-PG Ring Attractor</span>
+                <span class="pill">GNSS-Denied</span>
+                <span class="pill amber">Heading R²=0.99999</span>
+              </div>
+            </div>
+            <a href="https://colab.research.google.com/drive/1rC6muA-GFoirPVnCCikaVaie4qOp79Gp" target="_blank" class="btn-colab">
+              <span>▶</span> <span id="c4-btn">Käivita Colab T4</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3: Work Experience -->
+      <div class="hud-section">
+        <div class="section-header">
+          <div class="section-title">
+            <span>📜</span> <span id="title-exp">TÖÖKOGEMUS (1998 – 2026)</span>
+          </div>
+          <span class="section-tag">28 YEARS ENGINEERING & SYSTEMS</span>
+        </div>
+
+        <div class="timeline" id="exp-timeline">
+          <!-- Item 1 -->
+          <div class="timeline-item">
+            <div class="timeline-date">2018 – PRAEGU</div>
+            <div class="timeline-role">AI töövoogude automatiseerimine ja e-kaubandus</div>
+            <div class="timeline-company">Ettevõtja / Lokaalsed ja Linuxi VPS-süsteemid</div>
+            <div class="timeline-body">
+              Ehitan ja käitan automaatseid töövooge (Python, Claude Code, Codex, OpenCode, Antigravity, Hermes), mis ühendavad veebiliideseid, avatud lähtekoodiga UI-automaatika mudelite ja visuaalsete LLM-ide (VLM) põhist ekraanijuhtimist (varasemalt OpenCV ja Sikuli), meediageneratsiooni (Suno, Google Flow, veebivestlused, Reddit, X) ning prognoositurgude uurimist. Tegelen Androidi seadmete pöördprojekteerimise, ADB juhtimise ja telefoniautomaatikaga, 3D/CAD-tarkvara (AutoCAD, Blender, Inventor, Fusion 360) MCP-automaatikaga ning AI-rakmete arhitektuuri ja mudelite esilekerkivate omaduste uurimisega (Agentic-Universe GitHubis). Haldan automatiseeritud e-kaubanduse süsteeme ja jagan sisu 400 liikmega AI-grupis Kratimanaja.
+            </div>
+          </div>
+
+          <!-- Item 2 -->
+          <div class="timeline-item">
+            <div class="timeline-date">2013 – 2018</div>
+            <div class="timeline-role">Veebiarenduse koolitaja ja videoprodutsent</div>
+            <div class="timeline-company">Oma ettevõte / Eesti Töötukassa partner</div>
+            <div class="timeline-body">
+              Viisin läbi praktilisi veebiarenduse koolitusi Eesti Töötukassa tellimusel. Tegelesin videoproduktsiooniga ja ehitasin Arduino ning samm-mootoritega automatiseeritud kaameraroboteid.
+            </div>
+          </div>
+
+          <!-- Item 3 -->
+          <div class="timeline-item">
+            <div class="timeline-date">2011 – 2013</div>
+            <div class="timeline-role">CNC-programmeerija</div>
+            <div class="timeline-company">2 tootmistehast Eestis</div>
+            <div class="timeline-body">
+              Läbisin CNC-programmeerimise väljaõppe ja töötasin kahes tehases CNC-pinkide programmeerijana (G-code, AutoCAD).
+            </div>
+          </div>
+
+          <!-- Item 4 -->
+          <div class="timeline-item">
+            <div class="timeline-date">2009 – 2011</div>
+            <div class="timeline-role">Videoprodutsent</div>
+            <div class="timeline-company">Sudu (Sudu OÜ)</div>
+            <div class="timeline-body">
+              Filmi- ja liikuva graafika produktsioon, digitaalsed eriefektid ja monteerimine.
+            </div>
+          </div>
+
+          <!-- Item 5 -->
+          <div class="timeline-item">
+            <div class="timeline-date">DETS 2007 – 2009</div>
+            <div class="timeline-role">Testinsener, R&D spetsialist, Veahaldur (Error Manager)</div>
+            <div class="timeline-company">Cybercom Estonia OÜ (Nokia üksuses Tamperes, Soomes)</div>
+            <div class="timeline-body">
+              Prototüüptelefonide (Maemo, Ångström, Ubuntu) automaat- ja koormustestimine ning veahaldus (Error Management): võtsin vastu testkasutajate kaebused, haldasin veapileteid Lotus Notes süsteemis ja eskaleerisin filtreeritud vead arendajatele. Lisaks töötasin R&D kõrvalprojektis, et leida ja testida praktilisi kasutusjuhte Maemo platvormile ja BeagleBoard ARM äärearvutile (Raspberry Pi eelkäija).
+            </div>
+          </div>
+
+          <!-- Item 6 -->
+          <div class="timeline-item">
+            <div class="timeline-date">JAAN 2004 – JAAN 2007</div>
+            <div class="timeline-role">Kaasomanik, juhatuse liige, produtsent</div>
+            <div class="timeline-company">Rewind Meedia OÜ</div>
+            <div class="timeline-body">
+              Mobiilse sisuportaali mushroom.ee ja mitmikmängijaga veebipõhise ärimängu businesia.com (2–4 inimesega tiim, PHP ja C++) arendamine ja haldamine, video- ja interaktiivse sisu tootmine.
+            </div>
+          </div>
+
+          <!-- Item 7 -->
+          <div class="timeline-item">
+            <div class="timeline-date">NOV 2001 – SEPT 2004</div>
+            <div class="timeline-role">Montaažirežissöör (Editing Director)</div>
+            <div class="timeline-company">Rudolf Konimois Film OÜ</div>
+            <div class="timeline-body">
+              Montaaž, kaameratöö, värvimääramine ja liikuv graafika (Avid, Adobe Premiere, Maya, Realflow, ZBrush).
+            </div>
+          </div>
+
+          <!-- Item 8 -->
+          <div class="timeline-item">
+            <div class="timeline-date">MÄRTS 2001 – JAAN 2004</div>
+            <div class="timeline-role">Projektijuht</div>
+            <div class="timeline-company">PowerFX AB (Rootsi / Eesti)</div>
+            <div class="timeline-body">
+              Heliefektide teekide konverteerimise, tõlkimise ja andmete struktureerimise korraldamine Rootsi televisioonile SVT AB (Sveriges Television); arvukad uurimis-, automatiseerimis- ja konverteerimisprojektid.
+            </div>
+          </div>
+
+          <!-- Item 9 -->
+          <div class="timeline-item">
+            <div class="timeline-date">SEPT 2000 – SEPT 2001</div>
+            <div class="timeline-role">Produtsent, videomonteerija</div>
+            <div class="timeline-company">Orbital Vox Studios OÜ</div>
+            <div class="timeline-body">
+              Video- ja heliproduktsioon, koodekite uuringud lairiba IP-TV jaoks.
+            </div>
+          </div>
+
+          <!-- Item 10 -->
+          <div class="timeline-item">
+            <div class="timeline-date">APR 1998 – AUG 1999</div>
+            <div class="timeline-role">Turundusspetsialist</div>
+            <div class="timeline-company">Edelaraudtee AS</div>
+            <div class="timeline-body">
+              Läbirääkimised kohalike omavalitsustega sõiduplaanide parandamiseks, ettevõtte veebilehe planeerimine ja ehitamine, klientide kaebustele vastamine.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 4: Military & Skills -->
+      <div class="hud-section">
+        <div class="section-header">
+          <div class="section-title">
+            <span>🎖️</span> <span id="title-skills">AJATEENISTUS, HARIDUS JA TEHNILISED OSKUSED</span>
+          </div>
+          <span class="section-tag">NATO STANDARDS & COMPETENCIES</span>
+        </div>
+
+        <div class="skills-grid">
+          <div class="skill-block">
+            <h4 id="sb1-title">AJATEENISTUS (SISSISÕDUR / STAABIKIRJUTAJA)</h4>
+            <p id="sb1-desc">
+              Narva-Jõesuu Piirivalve Õppekeskuse sissikompanii — Staabikirjutaja: Kõrgendatud valmisolekuga sissiväljaõppe (hajutatud luure, varitsused, taandumised) üksus. Aitasin ohvitsere nende haridustöös, joonestasin operatsioonikaarte NATO standardites enne Eesti liitumist NATO-ga ja tegin igapäevaseid staabitöid.
+            </p>
+          </div>
+
+          <div class="skill-block">
+            <h4 id="sb2-title">AI RAKMED, AGENDID JA AUTOMAATIKA</h4>
+            <p id="sb2-desc">
+              Claude Code, Codex, OpenCode, Antigravity, Hermes, AI-rakmete ja mudelite esilekerkivate omaduste uurimine (Agentic-Universe), avatud lähtekoodiga UI-automaatika mudelid ja visuaalsed LLM-id (VLM-id; varasemalt ka OpenCV ja Sikuli), HippoRAG 2 / PathRAG, FastMCP automaatika.
+            </p>
+          </div>
+
+          <div class="skill-block">
+            <h4 id="sb3-title">SÜSTEEMID, ANDROID / ADB JA ÄÄREARVUTID</h4>
+            <p id="sb3-desc">
+              Androidi pöördprojekteerimine, ADB seadmejuhtimine ja telefoniautomaatika, Ubuntu / Debian Linux (tööjaamad ja VPS), BeagleBoard (ARM äärearvuti), Maemo ja Ångström (Nokia/Cybercom), Windows, macOS, Python, C++, PHP, PostgreSQL, MySQL, Lotus Notes, Arduino samm-mootorite juhtimine.
+            </p>
+          </div>
+
+          <div class="skill-block">
+            <h4 id="sb4-title">CAD, 3D / MCP JA KEELED</h4>
+            <p id="sb4-desc">
+              CAD ja 3D (sh MCP-automaatika): AutoCAD, Blender, Autodesk Inventor, Fusion 360, CNC G-code, Maya, Realflow, ZBrush, Avid, Adobe Premiere.<br>
+              <strong>Keeled:</strong> Eesti (emakeel), Inglise (väga hea), Vene ja Saksa (hea arusaamine, keskmine kõne), Soome (algtase, töökogemus Tamperes).
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div>ILMAR SELTER // TIVJ & NESTAI AUTONOMY PORTFOLIO // C4ISR COMPLIANT</div>
+      <div style="margin-top: 6px; color: var(--cyan-bright);">
+        Live Host: <a href="https://isleof.github.io/tivj-c4isr-cv/" style="color: inherit; text-decoration: underline;">https://isleof.github.io/tivj-c4isr-cv/</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // Live Ticking Clock
+    function updateClock() {
+      const now = new Date();
+      const timeStr = now.toISOString().substring(11, 19) + ' UTC';
+      document.getElementById('status-time').innerText = 'TIME UTC: ' + timeStr;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Language Toggle Data
+    let currentLang = 'et';
+    const langData = {
+      en: {
+        langBtn: "EST / ENG",
+        c4isr: "C4ISR // NATO APP-6 COMPLIANT",
+        gnss: "GNSS: JAMMED / DENIED",
+        pfl3: "FlyWire PFL3 LOCK: R²=0.99999",
+        sub: "AI Workflow Automation, Systems Integration & Prototype Error Management",
+        pdfDl: "Download PDF CV (2 Pages)",
+        drive: "Google Drive Colab Portfolio",
+        sumTitle: "EXECUTIVE SUMMARY // KOKKUVÕTE",
+        sumContent: "I specialize daily in workflow automation, systems integration, and investigating the emergent properties of AI harnesses and models (Agentic-Universe project on GitHub; daily hands-on with Python, Claude Code, Codex, OpenCode, Antigravity, Hermes, visual language models / VLMs, and open-source UI automation across local workstations and Linux VPS systems). Previously worked in Tampere, Finland at Nokia's unit (Cybercom Estonia OÜ) as a prototype phone tester, R&D specialist, and Error Manager in Lotus Notes, escalating filtered defects to developers and researching practical use cases for Maemo and the BeagleBoard ARM edge computing platform (precursor to Raspberry Pi). Completed military service at the Narva-Jõesuu Border Guard Training Center Guerrilla Company as a staff clerk, drafting operational maps according to NATO standards prior to Estonia's NATO accession. Founder of the ~400-member Facebook AI automation community Kratimanaja.",
+        colabsTitle: "EXECUTABLE GOOGLE COLAB PORTFOLIO MODELS",
+        c1Title: "Bayesian Fault Triage, Android ADB Bridge to NATO CoT XML & Jetson INT8",
+        c1Desc: "Binds telemetry anomalies to operator bug reports via a Bayesian root-cause engine, captures closed Android displays via ADB & VLMs into NATO CoT v2.0 XML (CEP95 = 19.67 m), synthesizes FastMCP parametric CAD brackets, and benchmarks NVIDIA Jetson Orin Nano INT8 quantization on Colab T4 GPU (9.4 ms / 106 FPS).",
+        c1Btn: "Launch Colab T4",
+        c2Title: "HippoRAG 2 & PathRAG Multi-Hop Knowledge Retrieval from Technical Manuals",
+        c2Desc: "2026 HippoRAG 2 (Personalized PageRank) and PathRAG causal subgraph pruning reconstruct multi-document reasoning paths in 0.84 ms with 2.72x token reduction (100% precision linking military telemetry to maintenance manuals).",
+        c2Btn: "Launch Colab T4",
+        c3Title: "Civil Vehicle UGV Autonomous Conversion & CBF-QP Safety Filter (~€146 Kit)",
+        c3Desc: "Compensates for 18V cordless drill planetary steering rate saturation (28°/s) and 140 ms optical camera delay via Smith state prediction (-58.3% trajectory error), maneuvers vehicle safely around crater hazards using a Control Barrier Function (+1.40 m clearance), and triggers a 150 ms watchdog fail-safe brake.",
+        c3Btn: "Launch Colab T4",
+        c4Title: "FlyWire Connectome GNSS-Denied 3D FPV Drone Navigation & Neural Compass",
+        c4Desc: "When GNSS is jammed, navigates using the Drosophila electron-microscopy whole-brain connectome (FlyWire) Central Complex (E-PG compass & P-FN velocity neurons), sustaining compass heading without GPS (R² = 0.99999) and calculating homebound vectors with 0.65° angular precision (0.91% drift).",
+        c4Btn: "Launch Colab T4",
+        expTitle: "WORK EXPERIENCE (1998 – 2026)",
+        skillsTitle: "MILITARY SERVICE, EDUCATION & TECHNICAL COMPETENCIES",
+        sb1Title: "MILITARY SERVICE (GUERRILLA SQUAD / STAFF CLERK)",
+        sb1Desc: "Narva-Jõesuu Border Guard Training Center Guerrilla Company — Staff Clerk: High-readiness guerrilla warfare unit (dispersed reconnaissance, ambushes, tactical evasions). Assisted officers in educational curricula, drafted operational maps according to NATO standards prior to Estonia's official accession, and handled daily staff log management.",
+        sb2Title: "AI HARNESSES, AGENTS & AUTOMATION",
+        sb2Desc: "Claude Code, Codex, OpenCode, Antigravity, Hermes, AI harness architecture & emergent behavior research (Agentic-Universe), open-source UI automation & visual LLMs (VLMs; previously OpenCV & Sikuli), HippoRAG 2 / PathRAG, FastMCP parametric automation.",
+        sb3Title: "SYSTEMS, ANDROID / ADB & EDGE COMPUTING",
+        sb3Desc: "Android reverse engineering, ADB device control and phone automation, Ubuntu / Debian Linux (workstations & cloud VPS), BeagleBoard (ARM edge SBC), Maemo & Ångström (Nokia/Cybercom), Windows, macOS, Python, C++, PHP, PostgreSQL, MySQL, Lotus Notes, Arduino stepper motor kinematics.",
+        sb4Title: "CAD, 3D / MCP & LANGUAGES",
+        sb4Desc: "CAD and 3D (including MCP automation): AutoCAD, Blender, Autodesk Inventor, Fusion 360, CNC G-code, Maya, Realflow, ZBrush, Avid, Adobe Premiere.<br><strong>Languages:</strong> Estonian (Native), English (Fluent), Russian & German (Good comprehension, intermediate speech), Finnish (Basic, work experience in Tampere)."
+      },
+      et: {
+        langBtn: "ENG / EST",
+        c4isr: "C4ISR // NATO APP-6",
+        gnss: "GNSS: SEGATUD / JAMMED",
+        pfl3: "FlyWire PFL3 LOCK: R²=0.99999",
+        sub: "AI töövoogude automatiseerimine, süsteemide ühendamine ja prototüüpide veahaldus",
+        pdfDl: "Laadi alla PDF CV (2 lehte)",
+        drive: "Google Drive Colab Portfoolio",
+        sumTitle: "KOKKUVÕTE // EXECUTIVE SUMMARY",
+        sumContent: "Tegelen igapäevaselt töövoogude automatiseerimise, tarkvarasüsteemide ühendamise ning AI-rakmete (AI harness) ja mudelite esilekerkivate omaduste uurimisega (projekt Agentic-Universe GitHubis; kasutan igapäevaselt Python-it, Claude Code-i, Codex-it, OpenCode-i, Antigravity-t, Hermes-t, visuaalseid keelemudeleid / VLM-e ja avatud lähtekoodiga UI-automaatika mudeleid lokaalsetes masinates ja Linuxi VPS-serverites). Varasemalt töötasin Soomes Tamperes Nokia üksuses (Cybercom Estonia OÜ) prototüüptelefonide testija, R&D spetsialisti ja veahaldurina (Error Manager), kus haldasin testkasutajate veateateid Lotus Notes keskkonnas, suunasin filtreeritud vead arendajatele ning töötasin R&D kõrvalprojektis Maemo ja BeagleBoard (Raspberry Pi sarnane ARM äärearvuti) platvormidele praktiliste kasutusjuhtude leidmise ja testimisega. Ajateenistuse läbisin Narva-Jõesuu Piirivalve Õppekeskuse sissikompaniis staabikirjutajana, kus aitasin ohvitsere õppetöös ja joonestasin operatsioonikaarte NATO standardites juba enne Eesti liitumist NATO-ga. Juhin ligi 400 liikmega Facebooki AI- ja automaatikagruppi Kratimanaja.",
+        colabsTitle: "KÄIVITATAVAD GOOGLE COLAB NÄIDISMUDELID",
+        c1Title: "Veatriaaž, Android ADB sild NATO CoT XML-i ja Jetson Orin Nano INT8",
+        c1Desc: "Seob telemeetria anomaaliad operaatori veateatega Bayesi juurpõhjuste mudelisse, loeb läbi ADB ja VLM-i suletud Androidi ekraanilt sihtmärgi koordinaadid NATO CoT v2.0 XML-formaati (CEP95 = 19.67 m), genereerib MCP CAD-klambri ning testib Colabi T4 GPU peal NVIDIA Jetson Orin Nano (8GB) INT8 kvantimist (9.4 ms / 106 FPS).",
+        c1Btn: "Käivita Colab T4",
+        c2Title: "HippoRAG 2 ja PathRAG mitme-sammu teadmusotsing tehnilistest juhenditest",
+        c2Desc: "2026. a HippoRAG 2 (Personalized PageRank) ja PathRAG seoseahelate kärpimine leiab mitut dokumenti läbiva põhjusliku ahela 0.84 ms jooksul 2.72x väiksema tekstikuluga (100% täpsus militaarsete andmete ja remondijuhendite seostamisel).",
+        c2Btn: "Käivita Colab T4",
+        c3Title: "Tsiviilsõiduki UGV konversioon ja CBF-QP ohutusfilter (~146 € komplekt)",
+        c3Desc: "Kompenseerib 18V akutrelli mootori roolireduktori kiiruspiirangu (28°/s) ja kaamera 140 ms pildiviite Smithi olekuennustusega (-58.3% trajektooriviga), juhib auto CBF ohutusfiltriga ümber mürsulehtri (+1.40 m varu) ning rakendab sidekao korral 150 ms turvarelee ja tiguajamiga piduri.",
+        c3Btn: "Käivita Colab T4",
+        c4Title: "FlyWire konnektoomi GPS-vaba 3D FPV drooninavigatsioon ja tehisaju",
+        c4Desc: "Kui GPS on segatud, kasutab mudel äädikakärbse elektronmikroskoobi ajuskanneeringust (FlyWire konnektoom) võetud navigatsioonikeskuse (Central Complex E-PG kompassi- ja P-FN kiirusneuronite) sünaptilist võrku, hoides ilma GPS-ita kompassisuunda (R² = 0.99999) ja arvutades kodutee vektori (0.65° täpsusega, triiv 0.91%).",
+        c4Btn: "Käivita Colab T4",
+        expTitle: "TÖÖKOGEMUS (1998 – 2026)",
+        skillsTitle: "AJATEENISTUS, HARIDUS JA TEHNILISED OSKUSED",
+        sb1Title: "AJATEENISTUS (SISSISÕDUR / STAABIKIRJUTAJA)",
+        sb1Desc: "Narva-Jõesuu Piirivalve Õppekeskuse sissikompanii — Staabikirjutaja: Kõrgendatud valmisolekuga sissiväljaõppe (hajutatud luure, varitsused, taandumised) üksus. Aitasin ohvitsere nende haridustöös, joonestasin operatsioonikaarte NATO standardites enne Eesti liitumist NATO-ga ja tegin igapäevaseid staabitöid.",
+        sb2Title: "AI RAKMED, AGENDID JA AUTOMAATIKA",
+        sb2Desc: "Claude Code, Codex, OpenCode, Antigravity, Hermes, AI-rakmete ja mudelite esilekerkivate omaduste uurimine (Agentic-Universe), avatud lähtekoodiga UI-automaatika mudelid ja visuaalsed LLM-id (VLM-id; varasemalt ka OpenCV ja Sikuli), HippoRAG 2 / PathRAG, FastMCP automaatika.",
+        sb3Title: "SÜSTEEMID, ANDROID / ADB JA ÄÄREARVUTID",
+        sb3Desc: "Androidi pöördprojekteerimine, ADB seadmejuhtimine ja telefoniautomaatika, Ubuntu / Debian Linux (tööjaamad ja VPS), BeagleBoard (ARM äärearvuti), Maemo ja Ångström (Nokia/Cybercom), Windows, macOS, Python, C++, PHP, PostgreSQL, MySQL, Lotus Notes, Arduino samm-mootorite juhtimine.",
+        sb4Title: "CAD, 3D / MCP JA KEELED",
+        sb4Desc: "CAD ja 3D (sh MCP-automaatika): AutoCAD, Blender, Autodesk Inventor, Fusion 360, CNC G-code, Maya, Realflow, ZBrush, Avid, Adobe Premiere.<br><strong>Keeled:</strong> Eesti (emakeel), Inglise (väga hea), Vene ja Saksa (hea arusaamine, keskmine kõne), Soome (algtase, töökogemus Tamperes)."
+      }
+    };
+
+    function toggleLanguage() {
+      currentLang = currentLang === 'et' ? 'en' : 'et';
+      const d = langData[currentLang];
+      document.getElementById('langBtnText').innerText = d.langBtn;
+      document.getElementById('status-c4isr').innerText = d.c4isr;
+      document.getElementById('status-gnss').innerText = d.gnss;
+      document.getElementById('status-pfl3').innerText = d.pfl3;
+      document.getElementById('prof-sub').innerText = d.sub;
+      document.getElementById('btn-pdf-dl').innerText = d.pdfDl;
+      document.getElementById('btn-drive').innerText = d.drive;
+      document.getElementById('title-summary').innerText = d.sumTitle;
+      document.getElementById('content-summary').innerText = d.sumContent;
+      document.getElementById('title-colabs').innerText = d.colabsTitle;
+      document.getElementById('c1-title').innerText = d.c1Title;
+      document.getElementById('c1-desc').innerText = d.c1Desc;
+      document.getElementById('c1-btn').innerText = d.c1Btn;
+      document.getElementById('c2-title').innerText = d.c2Title;
+      document.getElementById('c2-desc').innerText = d.c2Desc;
+      document.getElementById('c2-btn').innerText = d.c2Btn;
+      document.getElementById('c3-title').innerText = d.c3Title;
+      document.getElementById('c3-desc').innerText = d.c3Desc;
+      document.getElementById('c3-btn').innerText = d.c3Btn;
+      document.getElementById('c4-title').innerText = d.c4Title;
+      document.getElementById('c4-desc').innerText = d.c4Desc;
+      document.getElementById('c4-btn').innerText = d.c4Btn;
+      document.getElementById('title-exp').innerText = d.expTitle;
+      document.getElementById('title-skills').innerText = d.skillsTitle;
+      document.getElementById('sb1-title').innerText = d.sb1Title;
+      document.getElementById('sb1-desc').innerText = d.sb1Desc;
+      document.getElementById('sb2-title').innerText = d.sb2Title;
+      document.getElementById('sb2-desc').innerText = d.sb2Desc;
+      document.getElementById('sb3-title').innerText = d.sb3Title;
+      document.getElementById('sb3-desc').innerText = d.sb3Desc;
+      document.getElementById('sb4-title').innerHTML = d.sb4Title;
+      document.getElementById('sb4-desc').innerHTML = d.sb4Desc;
+    }
+
+    // Canvas C4ISR Military Tactical Map Rendering
+    const canvas = document.getElementById('tacticalCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Map targets in Western Russia (Relative coordinates 0..1)
+    const targets = [
+      { name: "ST. PETERSBURG", x: 0.68, y: 0.28, arrows: 4 },
+      { name: "NOVGOROD", x: 0.72, y: 0.44, arrows: 4 },
+      { name: "PSKOV", x: 0.62, y: 0.54, arrows: 3 },
+      { name: "TVER", x: 0.82, y: 0.58, arrows: 2 },
+      { name: "MOSCOW", x: 0.88, y: 0.72, arrows: 5 }
+    ];
+
+    // Friendly 28 Drones along Eastern Estonian border (Narva to Setomaa)
+    const drones = [];
+    for (let i = 0; i < 28; i++) {
+      const t = i / 27;
+      // Border line from Narva (0.50, 0.32) down to Voru/Setomaa (0.47, 0.58)
+      drones.push({
+        x: 0.48 + (Math.sin(i * 1.5) * 0.015),
+        y: 0.32 + t * 0.26,
+        targetIdx: i % targets.length,
+        offset: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Threat interception markers along border
+    const threatIntercepts = [];
+    for (let i = 0; i < 20; i++) {
+      threatIntercepts.push({
+        x: 0.47 + (Math.random() - 0.5) * 0.02,
+        y: 0.26 + (i / 19) * 0.52,
+        spawnX: 0.92 + (Math.random() - 0.5) * 0.08,
+        spawnY: 0.20 + (i / 19) * 0.65
+      });
+    }
+
+    let radarAngle = 0;
+
+    function renderTacticalMap() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // 1. Draw NATO border line (Finland, Estonia, Latvia, Lithuania)
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(0, 243, 200, 0.35)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.moveTo(w * 0.52, h * 0.15); // Finland border
+      ctx.lineTo(w * 0.50, h * 0.32); // Narva
+      ctx.lineTo(w * 0.48, h * 0.45); // Peipsi
+      ctx.lineTo(w * 0.46, h * 0.60); // Latvia border
+      ctx.lineTo(w * 0.42, h * 0.85); // Lithuania border
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 2. Draw 20 Intercepted Threat Red Trajectories
+      threatIntercepts.forEach((th, idx) => {
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255, 51, 102, 0.25)";
+        ctx.lineWidth = 1.2;
+        ctx.moveTo(w * th.spawnX, h * th.spawnY);
+        // Curve to intercept point
+        const cx = (th.spawnX + th.x) / 2 + 0.05;
+        const cy = (th.spawnY + th.y) / 2 - 0.03;
+        ctx.quadraticCurveTo(w * cx, h * cy, w * th.x, h * th.y);
+        ctx.stroke();
+
+        // Glowing cyan X intercept marker
+        ctx.strokeStyle = "rgba(0, 243, 200, 0.85)";
+        ctx.lineWidth = 2;
+        const ix = w * th.x;
+        const iy = h * th.y;
+        ctx.beginPath();
+        ctx.moveTo(ix - 5, iy - 5); ctx.lineTo(ix + 5, iy + 5);
+        ctx.moveTo(ix + 5, iy - 5); ctx.lineTo(ix - 5, iy + 5);
+        ctx.stroke();
+      });
+
+      // 3. Draw 18 Cyan Strike Corridors from Estonia to Russian Targets
+      const now = Date.now() / 1000;
+      drones.forEach((dr, i) => {
+        const tg = targets[dr.targetIdx];
+        const sx = w * dr.x;
+        const sy = w * dr.y * (h / w);
+        const ex = w * tg.x;
+        const ey = h * tg.y;
+
+        // Draw animated corridor line
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(0, 243, 200, 0.2)";
+        ctx.lineWidth = 1.5;
+        const cpx = (sx + ex) / 2 + Math.sin(i) * 30;
+        const cpy = (sy + ey) / 2 - Math.cos(i) * 40;
+        ctx.quadraticCurveTo(cpx, cpy, ex, ey);
+        ctx.stroke();
+
+        // Animated flow pulses
+        const progress = (now * 0.4 + i * 0.15) % 1;
+        const px = (1 - progress) * (1 - progress) * sx + 2 * (1 - progress) * progress * cpx + progress * progress * ex;
+        const py = (1 - progress) * (1 - progress) * sy + 2 * (1 - progress) * progress * cpy + progress * progress * ey;
+
+        ctx.fillStyle = "rgba(57, 255, 219, 0.85)";
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw drone triangle icon
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.fillStyle = "#00f3c8";
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(4, 4);
+        ctx.lineTo(-4, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // 4. Draw Targets with concentric reticles
+      targets.forEach(tg => {
+        const tx = w * tg.x;
+        const ty = h * tg.y;
+
+        // Concentric rings
+        ctx.strokeStyle = "rgba(255, 183, 0, 0.5)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(tx, ty, 14, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(tx, ty, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 183, 0, 0.3)";
+        ctx.fill();
+
+        // Label
+        ctx.font = "9px 'JetBrains Mono', monospace";
+        ctx.fillStyle = "#ffb700";
+        ctx.fillText(tg.name, tx + 18, ty + 3);
+      });
+
+      // 5. Polar Radar Sweep (Narva Hub)
+      const rx = w * 0.50;
+      const ry = h * 0.35;
+      const radarRadius = Math.min(w, h) * 0.45;
+      radarAngle += 0.015;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(rx, ry, radarRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(0, 243, 200, 0.06)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Sweep gradient
+      const sweepGrad = ctx.createRadialGradient(rx, ry, 0, rx, ry, radarRadius);
+      sweepGrad.addColorStop(0, "rgba(0, 243, 200, 0.15)");
+      sweepGrad.addColorStop(1, "rgba(0, 243, 200, 0)");
+
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.arc(rx, ry, radarRadius, radarAngle, radarAngle + 0.35);
+      ctx.closePath();
+      ctx.fillStyle = sweepGrad;
+      ctx.fill();
+      ctx.restore();
+
+      requestAnimationFrame(renderTacticalMap);
+    }
+
+    renderTacticalMap();
+  </script>
+</body>
+</html>
